@@ -2,16 +2,18 @@
 
 import React, { useState } from 'react';
 import { useParams } from 'next/navigation';
+
+// Strict Explicit Relative Navigation (Bypassing Alias Lookups)
 import { GlobalQubitCounter } from '../../../components/ui/global-qubit-counter';
 import { NativePrimitives } from '../../../components/libraries/NativePrimitives';
 import { CommunityArtifacts } from '../../../components/libraries/CommunityArtifacts';
 import { ControlRibbon } from '../../../components/workspace/ControlRibbon';
 import { CanvasViewport } from '../../../components/workspace/CanvasViewport';
-import { NodePortWrite } from '../../../components/workspace/NodePortWrite';
+import { NodePortWrite } from '../../../components/workspace/NodePortWire';
 import { WaveProfileMonitor } from '../../../components/workspace/WaveProfileMonitor';
 import { useWorkspaceActions } from '../../../hooks/useWorkspaceActions';
 import { useQuantumLibrarySync } from '../../../hooks/useQuantumLibrarySync';
-import { useWorkspaceStore, NodeData } from '../../../store/useWorkspaceStore';
+import { useWorkspaceStore } from '../../../store/useWorkspaceStore';
 
 export default function StudioDashboardSandbox() {
   const params = useParams();
