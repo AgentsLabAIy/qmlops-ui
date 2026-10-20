@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useRef } from 'react';
 import { useWorkspaceStore } from '../../store/useWorkspaceStore';
 import { useGlobalQubitStore } from '../../store/useGlobalQubitStore';
 
@@ -8,58 +8,153 @@ interface CanvasViewportProps {
 }
 
 export const CanvasViewport: React.FC<CanvasViewportProps> = ({ onSelectNode, selectedNodeId }) => {
-  const { nodes, workspaceName } = useWorkspaceStore();
+  const { nodes, workspaceName, addNode, updateNodePosition, edges, addEdge } = useWorkspaceStore();
   const { globalQubits } = useGlobalQubitStore();
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const [wireSourceNodeId, setWireSourceNodeId] = useState<string | null>(null);
+  const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+
+  const handleDropCanvas = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (!containerRef.current) return;
+
+    const nodeType = e.dataTransfer.getData('application/quantum-studio-type');
+    if (!nodeType) return;
+
+    const rect = containerRef.current.getBoundingClientRect();
+    const xPosition = e.clientX - rect.left - 112; 
+    const yPosition = e.clientY - rect.top - 45;
+
+    addNode({
+      id: `${nodeType.toLowerCase().replace(/[^a-z0-9]/g, '')}_${Date.now()}`,
+      type: nodeType,
+      position: { x: xPosition, y: yPosition },
+      parameters: nodeType === 'QNN' ? { layers: 4 } : { addressMode: 'Direct' }
+    });
+  };
+
+  const handleNodeMouseDown = (e: React.MouseEvent, id: string, currentPos: { x: number; y: number }) => {
+    if ((e.target as HTMLElement).closest('.port-wire-handle')) return;
+    
+    setDraggingNodeId(id);
+    setDragOffset({
+      x: e.clientX - currentPos.x,
+      y: e.clientY - currentPos.y
+    });
+    onSelectNode(id);
+  };
+
+  const handleCanvasMouseMove = (e: React.MouseEvent) => {
+    if (!draggingNodeId || !containerRef.current) return;
+    
+    let targetX = e.clientX - dragOffset.x;
+    let targetY = e.clientY - dragOffset.y;
+
+    updateNodePosition(draggingNodeId, targetX, targetY);
+  };
+
+  const handleCanvasMouseUp = () => {
+    setDraggingNodeId(null);
+  };
+
+  const handlePortWireConnectClick = (e: React.MouseEvent, nodeId: string) => {
+    e.stopPropagation();
+    
+    if (!wireSourceNodeId) {
+      setWireSourceNodeId(nodeId);
+    } else {
+      addEdge(wireSourceNodeId, nodeId);
+      setWireSourceNodeId(null);
+    }
+  };
 
   return (
-    <div className="w-full h-full relative overflow-hidden bg-slate-950 graphical-viewport">
-      {/* Interactive visual matrix lines aligned via app globals declaration */}
+    <div 
+      ref={containerRef}
+      onDragOver={handleDragOver}
+      onDrop={handleDropCanvas}
+      onMouseMove={handleCanvasMouseMove}
+      onMouseUp={handleCanvasMouseUp}
+      onClick={() => { setWireSourceNodeId(null); onSelectNode(null); }}
+      className="w-full h-full relative overflow-hidden bg-slate-950 graphical-viewport cursor-default"
+    >
       <div className="absolute inset-0 pattern-grid opacity-40 pointer-events-none" />
-      
-      <div className="absolute inset-0 p-24 overflow-auto flex flex-wrap content-start gap-6 pt-28">
-        {nodes.length === 0 ? (
-          <div className="m-auto text-xs text-slate-600 font-sans italic p-8 border border-dashed border-slate-900 rounded-xl select-none text-center">
-            Canvas Mesh Empty.<br />Select native primitives or community components from the Left library shelf to populate the workspace topology.
-          </div>
-        ) : (
-          nodes.map((node) => {
-            const isSelected = node.id === selectedNodeId;
-            return (
-              <div 
-                key={node.id} 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onSelectNode(node.id);
-                }}
-                className={`p-4 bg-slate-900 border rounded-xl w-56 text-left text-white shadow-2xl relative select-none cursor-pointer transition-all active:scale-[0.98] animate-fadeIn ${
-                  isSelected 
-                    ? 'border-cyan-400 ring-2 ring-cyan-950 ring-offset-2 ring-offset-slate-950 shadow-cyan-950/50' 
-                    : 'border-slate-800 hover:border-slate-700'
-                }`}
-              >
-                {/* Visual node selection indicator light port dots mapping */}
-                {isSelected && (
-                  <span className="absolute top-2 right-2 w-2 h-2 bg-cyan-400 rounded-full shadow-[0_0_8px_#06b6d4]" />
-                )}
 
-                <div className="text-[10px] font-bold text-cyan-400 font-sans tracking-wide uppercase mb-1">
-                  {node.type === 'QNN' ? '🏺 QNN Layer Mold' : node.type === 'QRAM' ? '💾 QRAM Matrix Array' : '⨂ Custom QGate'}
-                </div>
-                <div className="text-[9px] font-mono text-slate-500 mb-2">ID: {node.id}</div>
-                
-                <div className="p-2 bg-slate-950 rounded border border-slate-900 font-mono text-[10px] text-slate-400 space-y-1">
-                  <div>Inherited Wires: <span className="text-cyan-400 font-bold">N={globalQubits}</span></div>
-                  {node.type === 'QNN' && <div>Layers Deep: <span className="text-emerald-400 font-bold">{node.parameters.layers || 4}</span></div>}
-                  {node.type === 'QRAM' && <div>Address Mode: <span className="text-emerald-400 font-bold">{node.parameters.addressMode || 'Direct'}</span></div>}
-                </div>
+      {/* --- CONNECTIONS LAYER --- */}
+      <svg className="absolute inset-0 w-full h-full pointer-events-none z-0">
+        {edges.map((edge) => {
+          const sourceNode = nodes.find(n => n.id === edge.source);
+          const targetNode = nodes.find(n => n.id === edge.target);
+
+          if (!sourceNode || !targetNode) return null;
+
+          const startX = sourceNode.position.x + 112; 
+          const startY = sourceNode.position.y + 100; 
+          const endX = targetNode.position.x + 112;
+          const endY = targetNode.position.y;
+
+          const controlY = startY + (endY - startY) / 2;
+          const dCurvePath = `M ${startX} ${startY} C ${startX} ${controlY}, ${endX} ${controlY}, ${endX} ${endY}`;
+
+          return (
+            <g key={edge.id}>
+              <path d={dCurvePath} className="stroke-cyan-500/80 stroke-2 fill-none animate-pulse" />
+              <circle cx={startX} cy={startY} r="3" className="fill-cyan-400" />
+              <circle cx={endX} cy={endY} r="3" className="fill-cyan-400" />
+            </g>
+          );
+        })}
+      </svg>
+
+      {/* --- NODES DOM LAYER --- */}
+      <div className="absolute inset-0 pointer-events-none z-10 p-4">
+        {nodes.map((node) => {
+          const isSelected = node.id === selectedNodeId;
+          const isPendingSource = node.id === wireSourceNodeId;
+          
+          return (
+            <div 
+              key={node.id} 
+              onMouseDown={(e) => handleNodeMouseDown(e, node.id, node.position)}
+              onClick={(e) => { e.stopPropagation(); onSelectNode(node.id); }}
+              style={{ transform: `translate3d(${node.position.x}px, ${node.position.y}px, 0px)`, position: 'absolute' }}
+              className={`p-4 bg-slate-900 border rounded-xl w-56 text-left text-white shadow-2xl select-none pointer-events-auto cursor-grab active:cursor-grabbing ${
+                isSelected ? 'border-cyan-400 ring-2 ring-cyan-950' : 'border-slate-800'
+              }`}
+            >
+              {/* TOP TERMINAL INPUT PIN */}
+              <div 
+                onClick={(e) => handlePortWireConnectClick(e, node.id)}
+                className={`port-wire-handle absolute -top-1.5 left-[106px] w-3 h-3 rounded-full border-2 border-slate-950 bg-slate-800 cursor-pointer hover:bg-cyan-400 transition-all ${
+                  wireSourceNodeId && !isPendingSource ? 'animate-bounce bg-emerald-500' : ''
+                }`}
+              />
+
+              <div className="text-[10px] font-bold text-cyan-400 font-sans tracking-wide uppercase mb-1">{node.type}</div>
+              <div className="text-[9px] font-mono text-slate-500 mb-2">ID: {node.id}</div>
+              
+              <div className="p-2 bg-slate-950 rounded border border-slate-900 font-mono text-[10px] text-slate-400 space-y-1">
+                <div>Global Qubits: <span className="text-cyan-400 font-bold">{globalQubits}</span></div>
+                {node.type === 'QNN' && <div>Layers: <span className="text-emerald-400 font-bold">{node.parameters?.layers || 4}</span></div>}
+                {node.type === 'QRAM' && <div>Mode: <span className="text-emerald-400 font-bold">{node.parameters?.addressMode || 'Direct'}</span></div>}
               </div>
-            );
-          })
-        )}
-      </div>
-      
-      <div className="absolute bottom-3 left-4 text-[10px] font-mono text-slate-600 select-none">
-        Target Space Layout: {workspaceName}.json
+
+              {/* BOTTOM TERMINAL OUTPUT PIN */}
+              <div 
+                onClick={(e) => handlePortWireConnectClick(e, node.id)}
+                className={`port-wire-handle absolute -bottom-1.5 left-[106px] w-3 h-3 rounded-full border-2 border-slate-950 bg-slate-800 cursor-pointer hover:bg-cyan-400 transition-all ${
+                  isPendingSource ? 'bg-cyan-400 ring-2 ring-cyan-950' : ''
+                }`}
+              />
+            </div>
+          );
+        })}
       </div>
     </div>
   );
