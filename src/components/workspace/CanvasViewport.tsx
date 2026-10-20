@@ -12,7 +12,10 @@ export const CanvasViewport: React.FC<CanvasViewportProps> = ({ onSelectNode, se
   const { globalQubits } = useGlobalQubitStore();
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // States to manage live cursor coordinate wire tracing
   const [wireSourceNodeId, setWireSourceNodeId] = useState<string | null>(null);
+  const [liveCursorCoords, setLiveCursorCoords] = useState<{ x: number; y: number } | null>(null);
+  
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
 
@@ -50,28 +53,57 @@ export const CanvasViewport: React.FC<CanvasViewportProps> = ({ onSelectNode, se
     onSelectNode(id);
   };
 
+  // --- INTERACTIVE MOUSE TRACKER FOR BOTH CARD MOVING & WIRE DRAWING ---
   const handleCanvasMouseMove = (e: React.MouseEvent) => {
-    if (!draggingNodeId || !containerRef.current) return;
-    
-    let targetX = e.clientX - dragOffset.x;
-    let targetY = e.clientY - dragOffset.y;
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
 
-    updateNodePosition(draggingNodeId, targetX, targetY);
+    // Context A: User is dragging an active block around the mesh
+    if (draggingNodeId) {
+      let targetX = e.clientX - dragOffset.x;
+      let targetY = e.clientY - dragOffset.y;
+      updateNodePosition(draggingNodeId, targetX, targetY);
+      return;
+    }
+
+    // Context B: User is dragging a connection wire thread across the screen
+    if (wireSourceNodeId) {
+      setLiveCursorCoords({
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+      });
+    }
   };
 
+  // Clean up states when mouse click lifts on open canvas grid space
   const handleCanvasMouseUp = () => {
     setDraggingNodeId(null);
+    setWireSourceNodeId(null);
+    setLiveCursorCoords(null);
   };
 
-  const handlePortWireConnectClick = (e: React.MouseEvent, nodeId: string) => {
+  // --- DRAG-TO-WIRE EVENT HANDLERS ---
+  const handleWireDragStart = (e: React.MouseEvent, nodeId: string) => {
     e.stopPropagation();
+    e.preventDefault(); // Block native window ghost text dragging
+    setWireSourceNodeId(nodeId);
     
-    if (!wireSourceNodeId) {
-      setWireSourceNodeId(nodeId);
-    } else {
-      addEdge(wireSourceNodeId, nodeId);
-      setWireSourceNodeId(null);
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    setLiveCursorCoords({
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    });
+  };
+
+  const handleWireDragDropTarget = (e: React.MouseEvent, targetNodeId: string) => {
+    e.stopPropagation();
+    if (wireSourceNodeId && wireSourceNodeId !== targetNodeId) {
+      addEdge(wireSourceNodeId, targetNodeId);
     }
+    // Clean assembly states post-connection link drop
+    setWireSourceNodeId(null);
+    setLiveCursorCoords(null);
   };
 
   return (
@@ -81,13 +113,14 @@ export const CanvasViewport: React.FC<CanvasViewportProps> = ({ onSelectNode, se
       onDrop={handleDropCanvas}
       onMouseMove={handleCanvasMouseMove}
       onMouseUp={handleCanvasMouseUp}
-      onClick={() => { setWireSourceNodeId(null); onSelectNode(null); }}
+      onClick={() => { setWireSourceNodeId(null); setLiveCursorCoords(null); onSelectNode(null); }}
       className="w-full h-full relative overflow-hidden bg-slate-950 graphical-viewport cursor-default"
     >
       <div className="absolute inset-0 pattern-grid opacity-40 pointer-events-none" />
 
-      {/* --- CONNECTIONS LAYER --- */}
+      {/* --- CONNECTIONS SVG VECTOR MESH --- */}
       <svg className="absolute inset-0 w-full h-full pointer-events-none z-0">
+        {/* Render fully committed node-to-node circuit edges */}
         {edges.map((edge) => {
           const sourceNode = nodes.find(n => n.id === edge.source);
           const targetNode = nodes.find(n => n.id === edge.target);
@@ -110,13 +143,35 @@ export const CanvasViewport: React.FC<CanvasViewportProps> = ({ onSelectNode, se
             </g>
           );
         })}
+
+        {/* LIVE IN-FLIGHT CURRENT WIRE THREAD DRAW LAYER */}
+        {wireSourceNodeId && liveCursorCoords && (() => {
+          const activeSourceNode = nodes.find(n => n.id === wireSourceNodeId);
+          if (!activeSourceNode) return null;
+
+          const sX = activeSourceNode.position.x + 112;
+          const sY = activeSourceNode.position.y + 100;
+          const eX = liveCursorCoords.x;
+          const eY = liveCursorCoords.y;
+
+          const ctrlY = sY + (eY - sY) / 2;
+          const dragCurve = `M ${sX} ${sY} C ${sX} ${ctrlY}, ${eX} ${ctrlY}, ${eX} ${eY}`;
+
+          return (
+            <g>
+              <path d={dragCurve} className="stroke-cyan-400/90 stroke-2 stroke-dashed fill-none" strokeDasharray="4,4" />
+              <circle cx={sX} cy={sY} r="4" className="fill-cyan-400 animate-ping" />
+              <circle cx={eX} cy={eY} r="3" className="fill-cyan-400" />
+            </g>
+          );
+        })()}
       </svg>
 
-      {/* --- NODES DOM LAYER --- */}
+      {/* --- NODES CORE LAYOUT CONTAINER --- */}
       <div className="absolute inset-0 pointer-events-none z-10 p-4">
         {nodes.map((node) => {
           const isSelected = node.id === selectedNodeId;
-          const isPendingSource = node.id === wireSourceNodeId;
+          const isCurrentSource = node.id === wireSourceNodeId;
           
           return (
             <div 
@@ -128,12 +183,13 @@ export const CanvasViewport: React.FC<CanvasViewportProps> = ({ onSelectNode, se
                 isSelected ? 'border-cyan-400 ring-2 ring-cyan-950' : 'border-slate-800'
               }`}
             >
-              {/* TOP TERMINAL INPUT PIN */}
+              {/* TOP RECEIVING PORT: Mouse release loop triggers link binding */}
               <div 
-                onClick={(e) => handlePortWireConnectClick(e, node.id)}
-                className={`port-wire-handle absolute -top-1.5 left-[106px] w-3 h-3 rounded-full border-2 border-slate-950 bg-slate-800 cursor-pointer hover:bg-cyan-400 transition-all ${
-                  wireSourceNodeId && !isPendingSource ? 'animate-bounce bg-emerald-500' : ''
+                onMouseUp={(e) => handleWireDragDropTarget(e, node.id)}
+                className={`port-wire-handle absolute -top-1.5 left-[106px] w-3 h-3 rounded-full border-2 border-slate-950 bg-slate-800 cursor-pointer hover:bg-emerald-400 hover:scale-125 transition-all ${
+                  wireSourceNodeId && !isCurrentSource ? 'animate-pulse bg-emerald-500/80 border-emerald-400' : ''
                 }`}
+                title="Drop connecting wire thread anchor pin"
               />
 
               <div className="text-[10px] font-bold text-cyan-400 font-sans tracking-wide uppercase mb-1">{node.type}</div>
@@ -145,12 +201,13 @@ export const CanvasViewport: React.FC<CanvasViewportProps> = ({ onSelectNode, se
                 {node.type === 'QRAM' && <div>Mode: <span className="text-emerald-400 font-bold">{node.parameters?.addressMode || 'Direct'}</span></div>}
               </div>
 
-              {/* BOTTOM TERMINAL OUTPUT PIN */}
+              {/* BOTTOM DISPATCH PORT: Press mouse down here and hold to drag cable out */}
               <div 
-                onClick={(e) => handlePortWireConnectClick(e, node.id)}
-                className={`port-wire-handle absolute -bottom-1.5 left-[106px] w-3 h-3 rounded-full border-2 border-slate-950 bg-slate-800 cursor-pointer hover:bg-cyan-400 transition-all ${
-                  isPendingSource ? 'bg-cyan-400 ring-2 ring-cyan-950' : ''
+                onMouseDown={(e) => handleWireDragStart(e, node.id)}
+                className={`port-wire-handle absolute -bottom-1.5 left-[106px] w-3 h-3 rounded-full border-2 border-slate-950 bg-slate-800 cursor-pointer hover:bg-cyan-400 hover:scale-125 transition-all ${
+                  isCurrentSource ? 'bg-cyan-400 ring-2 ring-cyan-950 scale-110' : ''
                 }`}
+                title="Click and drag cable to connect blocks"
               />
             </div>
           );
