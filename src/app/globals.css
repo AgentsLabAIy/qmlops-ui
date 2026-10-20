@@ -1,0 +1,55 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: #020617; /* slate-950 */
+  overflow: hidden;
+  user-select: none;
+}
+
+/* Custom CSS Pattern Grid Matrix emulation for canvas backdrop alignment */
+.pattern-grid {
+  background-size: 20px 20px;
+  background-image: 
+    linear-gradient(to right, rgba(148, 163, 184, 0.1) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(148, 163, 184, 0.1) 1px, transparent 1px);
+}
+
+/* Clean animation transition frames for active element generation injection */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Custom aesthetic properties layout mapping sliders controls cleanups */
+.visual-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #06b6d4; /* cyan-500 */
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+
+.visual-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
