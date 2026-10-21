@@ -20,11 +20,11 @@ export const WaveProfileMonitor: React.FC = () => {
         <div className="flex items-center space-x-1.5">
           <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping" />
           <span className="text-[10px] font-black tracking-widest text-slate-400 uppercase font-sans">
-            📊 Emulated Telemetry Monitor
+            Illustrative topology preview
           </span>
         </div>
         <span className="text-[9px] font-mono text-emerald-500 bg-emerald-950/40 border border-emerald-900/60 px-1.5 py-0.5 rounded">
-          Active Vector
+          Not simulation data
         </span>
       </div>
 
@@ -44,8 +44,8 @@ export const WaveProfileMonitor: React.FC = () => {
       </div>
 
       <div className="flex justify-between items-center text-[9px] font-mono text-slate-500 px-0.5">
-        <span>State Resolution: 2^{nodes.length} states</span>
-        <span>Coherence Error Margin: 0.0034%</span>
+        <span>Blocks: {nodes.length}</span>
+        <span>Use Compile for probabilities</span>
       </div>
     </div>
   );

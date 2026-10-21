@@ -1,14 +1,15 @@
 import React, { useState, useRef } from 'react';
 import { useWorkspaceStore } from '../../store/useWorkspaceStore';
 import { useGlobalQubitStore } from '../../store/useGlobalQubitStore';
+import { createWorkspaceNode } from '../../services/compiler/circuit';
 
 interface CanvasViewportProps {
-  onSelectNode: (id: string) => void;
+  onSelectNode: (id: string | null) => void;
   selectedNodeId: string | null;
 }
 
 export const CanvasViewport: React.FC<CanvasViewportProps> = ({ onSelectNode, selectedNodeId }) => {
-  const { nodes, workspaceName, addNode, updateNodePosition, edges, addEdge } = useWorkspaceStore();
+  const { nodes, workspaceName, addNode, updateNodePosition, edges, addEdge, moduleTemplates } = useWorkspaceStore();
   const { globalQubits } = useGlobalQubitStore();
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -34,12 +35,17 @@ export const CanvasViewport: React.FC<CanvasViewportProps> = ({ onSelectNode, se
     const xPosition = e.clientX - rect.left - 112; 
     const yPosition = e.clientY - rect.top - 45;
 
-    addNode({
-      id: `${nodeType.toLowerCase().replace(/[^a-z0-9]/g, '')}_${Date.now()}`,
-      type: nodeType,
-      position: { x: xPosition, y: yPosition },
-      parameters: nodeType === 'QNN' ? { layers: 4 } : { addressMode: 'Direct' }
-    });
+    const node = createWorkspaceNode(nodeType, { x: xPosition, y: yPosition });
+    const templateId = e.dataTransfer.getData('application/quantum-studio-template');
+    if (templateId) {
+      const template = moduleTemplates.find(item => item.id === templateId);
+      if (!template) {
+        alert('This module template is no longer available. Drag it again from the library.');
+        return;
+      }
+      node.parameters = { name: template.name, source: template.source };
+    }
+    addNode(node);
   };
 
   const handleNodeMouseDown = (e: React.MouseEvent, id: string, currentPos: { x: number; y: number }) => {
@@ -192,11 +198,15 @@ export const CanvasViewport: React.FC<CanvasViewportProps> = ({ onSelectNode, se
                 title="Drop connecting wire thread anchor pin"
               />
 
-              <div className="text-[10px] font-bold text-cyan-400 font-sans tracking-wide uppercase mb-1">{node.type}</div>
+              <div className="text-[10px] font-bold text-cyan-400 font-sans tracking-wide uppercase mb-1">
+                {node.type === 'Gate' ? node.parameters.gate : node.parameters.name || node.type}
+              </div>
               <div className="text-[9px] font-mono text-slate-500 mb-2">ID: {node.id}</div>
               
               <div className="p-2 bg-slate-950 rounded border border-slate-900 font-mono text-[10px] text-slate-400 space-y-1">
                 <div>Global Qubits: <span className="text-cyan-400 font-bold">{globalQubits}</span></div>
+                {node.type === 'Gate' && <div>Operands: q[{node.parameters.qubits?.join('], q[')}]</div>}
+                {node.type === 'Gate' && node.parameters.angle !== undefined && <div>Angle: {node.parameters.angle}</div>}
                 {node.type === 'QNN' && <div>Layers: <span className="text-emerald-400 font-bold">{node.parameters?.layers || 4}</span></div>}
                 {node.type === 'QRAM' && <div>Mode: <span className="text-emerald-400 font-bold">{node.parameters?.addressMode || 'Direct'}</span></div>}
               </div>
@@ -212,6 +222,9 @@ export const CanvasViewport: React.FC<CanvasViewportProps> = ({ onSelectNode, se
             </div>
           );
         })}
+      </div>
+      <div className="absolute bottom-2 left-3 text-[10px] text-slate-500 pointer-events-none">
+        {workspaceName}: wires set execution order; unwired blocks use insertion order.
       </div>
     </div>
   );

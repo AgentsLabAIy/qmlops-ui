@@ -13,6 +13,12 @@ export interface EdgeData {
   target: string; // Head destination node block ID
 }
 
+export interface ModuleTemplate {
+  id: string;
+  name: string;
+  source: string;
+}
+
 interface WorkspaceState {
   workspaceName: string;
   nodes: NodeData[];
@@ -24,12 +30,16 @@ interface WorkspaceState {
   updateNodePosition: (id: string, x: number, y: number) => void;
   addEdge: (sourceId: string, targetId: string) => void;
   removeNode: (id: string) => void;
+  moduleTemplates: ModuleTemplate[];
+  addModuleTemplate: (template: ModuleTemplate) => void;
 }
 
 export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   workspaceName: 'untitled_pipeline',
   nodes: [],
   edges: [],
+  moduleTemplates: [],
+  addModuleTemplate: (template) => set((state) => ({ moduleTemplates: [...state.moduleTemplates, template] })),
   setWorkspaceName: (name) => set({ workspaceName: name }),
   setWorkspaceState: (nodes, edges) => set({ nodes, edges }),
   clearWorkspace: () => set({ nodes: [], edges: [], workspaceName: 'untitled_pipeline' }),

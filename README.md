@@ -1,8 +1,8 @@
 # Quantum MLOps Studio
 
-A Next.js prototype for composing quantum-oriented workspace blueprints from reusable blocks. The interface combines a component library, a selectable node canvas, editable block properties, JSON/QASM downloads, and a mock server-side workspace registry.
+A Next.js prototype for composing quantum circuits and workspace blueprints from reusable blocks. The interface combines a drag-and-drop canvas, editable gates, reusable modules, custom OpenQASM, QASM/Qiskit generation, browser state-vector simulation, and a mock workspace registry.
 
-**Project status:** this is a UI and integration prototype, not a production quantum compiler or simulator. Persistence is in server memory, telemetry is illustrative, and QASM export is a stub. Status text such as "Compiler Core: Connected" does not indicate an actual hardware or simulator connection.
+**Project status:** this is a prototype with a validated gate compiler and an ideal, noiseless JavaScript simulator limited to 16 qubits. It is not a hardware runtime or an arbitrary Python/OpenQASM interpreter. Persistence remains in server memory. The topology preview is decorative; actual probabilities appear only after compilation.
 
 ## Contents
 
@@ -10,6 +10,7 @@ A Next.js prototype for composing quantum-oriented workspace blueprints from reu
 - [Getting started](#getting-started)
 - [Commands](#commands)
 - [Functionality and usage](#functionality-and-usage)
+- [Compilation and simulation](#compilation-and-simulation)
 - [Repository structure](#repository-structure)
 - [Application architecture](#application-architecture)
 - [Data models](#data-models)
@@ -50,6 +51,8 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000). Next.js may select another port if 3000 is occupied; check the terminal output.
 
+Choose a port with `npm run dev -- --port 3100`, or set `$env:PORT = '3100'` in PowerShell before `npm run dev`. Substitute any available port. Run only one server/build per checkout: concurrent processes share `.next` and can leave JavaScript chunks out of sync.
+
 The home page redirects in the browser to a generated URL such as `/studio/researcher_123456`. For a stable workspace key, navigate directly to a URL such as [http://localhost:3000/studio/demo](http://localhost:3000/studio/demo).
 
 No environment variables, database, credentials, or external quantum services are required for the current implementation.
@@ -75,32 +78,39 @@ This starts a production Next.js server. It does **not** make the mock storage d
 | `npm run start` | Serve an existing production build |
 | `npm run lint` | Invoke `next lint`; ESLint dependencies/configuration are not currently supplied, so initial setup may be required |
 | `npx tsc --noEmit --incremental false` | Check TypeScript without generating an incremental cache file |
+| `npm test` | Run compiler, transpiler, and simulator tests using Node's built-in test runner |
 
-There is no automated test suite or `test` script in the repository.
+The tests use the existing TypeScript dependency to load service code; no additional test-runner dependency is required.
 
 ## Functionality and usage
 
 ### Workspace layout
 
 - **Header:** application identity, the current URL-based user context, and the global qubit input.
-- **Left pane:** native primitives and community artifacts.
+- **Left pane:** gate palette, modules, custom code, selected block attributes, blueprint placeholders, and community artifacts.
 - **Center pane:** action ribbon and a grid-backed, selectable card canvas.
-- **Right pane:** properties for the selected node and an emulated telemetry panel.
-- **Footer:** illustrative compiler/runtime status labels.
+- **Right pane:** usage guidance and a clearly labeled illustrative topology preview.
+- **Footer:** available compiler targets and browser simulation limit.
 
 ### Native primitives
 
-Click an item in the native library to add a node:
+Click a gate/module to add a node, or drag it onto the canvas. Select it to edit its attributes in the left pane. Nodes can be moved; drag a bottom port to another node's top port to create an execution dependency.
+
+The gate palette includes H, X, Y, Z, S, SDG, T, TDG, RX, RY, RZ, CX, CY, CZ, SWAP, CCX, MEASURE, and BARRIER. Rotation angles accept decimal radians or pi fractions. Multi-qubit gates expose ordered operands (controls first, target last; SWAP has two symmetric operands).
+
+Bell-pair and three-qubit GHZ modules are ready to use. Custom modules and custom-code blocks expose editable OpenQASM source. **Save as reusable module** validates the selected source and adds a template to the left palette for this browser session. Each instance has its own source; editing it does not change earlier instances or the saved template. Templates use absolute global qubit indices, not local module registers.
+
+The following legacy blueprints remain available under **Blueprint placeholders (not compilable)**:
 
 | Primitive | Stored type | Configuration |
 | --- | --- | --- |
-| Custom QGate Block | `CustomGate` | Generic properties message; no gate editor |
+| Undefined custom gate | `CustomGate` | No defined gate semantics; replace with a supported gate/module |
 | QNN Layer Mold | `QNN` | Editable layer depth, initially `4` |
 | QRAM Matrix Array | `QRAM` | Address mode: `Direct`, `BinaryTree`, or `Superposition` |
 
-Click a canvas card to select it and reveal its properties. Property changes update the workspace store and the card immediately. **Hide** clears the selection without removing the node.
+Click a canvas card to reveal its properties. Property changes update the workspace store and the card immediately. **Hide** clears selection. **Disconnect & Remove Block** removes the node and its wires.
 
-All cards display the shared global qubit count, initially `8`. The header input declares a range of 1-33; the QNN layer input declares 1-64. These HTML attributes are not comprehensive validation: the qubit store enforces only a lower bound of 1, and the property handler does not enforce the advertised upper layer limit.
+All cards display the shared global qubit count, initially `8`. The compiler validates an integer count of 1-33, distinct gate operands within range, finite angles, and valid classical bits. Compilation does not silently repair invalid input. Legacy QNN/QRAM attributes describe blueprints only and do not define executable gates.
 
 ### Community library
 
@@ -119,7 +129,8 @@ Clicking a community item creates a placeholder node with a type derived from th
 | Load | Retrieves the current user key's workspace from the mock API and replaces browser workspace state |
 | Save Local | Despite the label, posts the workspace to server memory; it does not write a local file or browser storage |
 | Export JSON | Downloads the current workspace as `<workspaceName>.json` |
-| Export QASM | Downloads stub QASM text as `<workspaceName>.qasm` |
+| Compile | Opens a language-selection card, generates OpenQASM 3 or Qiskit, and simulates the same circuit in JavaScript |
+| Export QASM | Validates and compiles through the same compiler, then downloads `<workspaceName>.qasm` without simulation |
 | Publish | Prompts for a name and appends an artifact metadata entry to the mock community registry |
 
 The library is fetched on mount and refreshed after publishing in the current page. Other open pages are not synchronized automatically.
@@ -127,15 +138,65 @@ The library is fetched on mount and refreshed after publishing in the current pa
 ### Example workflow
 
 1. Open `/studio/demo` to reuse a predictable save/load key.
-2. Add a QNN node and a QRAM node from the native library.
-3. Select each card and edit its supported properties.
-4. Change the global qubit count in the header.
+2. Set global qubits to `2` and add a **Bell pair (2 qubits)** module.
+3. Select its card and inspect/edit its OpenQASM source in the left pane.
+4. Select **Compile**, choose OpenQASM 3 or Qiskit, then **Compile and simulate**. Expect `00` and `11` with probability 50% each.
 5. Select **Save Local** to store the blueprint in the running server process.
 6. Select **Export JSON** for a downloadable snapshot independent of the server's lifetime.
 7. Select **New**, then **Load**, to restore the saved blueprint while the same server instance retains it.
 8. Select **Publish** to add an artifact metadata entry to the community shelf.
 
 Refreshing a studio page resets browser state; select **Load** explicitly to retrieve a saved workspace. Returning through `/` generates a new user key rather than reopening the previous key.
+
+## Compilation and simulation
+
+### Pipeline
+
+```text
+Workspace nodes + dependency wires + global qubit count
+    -> stable topological ordering
+    -> gate validation / module and custom-source expansion
+    -> shared Circuit instruction representation
+         |-> OpenQASM 3 emitter -> .qasm download
+         |-> Qiskit emitter    -> .py download
+         `-> simulator worker -> exact basis/measurement probabilities
+```
+
+Wires are **execution dependencies**, not qubit mappings. Gate attributes choose the quantum operands. Ready blocks use insertion order to break ties; an unwired circuit executes in insertion order regardless of visual position. Cycles, dangling wires, and duplicate node IDs cause explicit errors.
+
+The compilation card displays generated code, a download action, simulation status, and up to 64 of the most probable outcomes, with the full nonzero-outcome count and total probability. Editing the circuit invalidates old results. Closing the card terminates its simulation worker.
+
+### Supported custom OpenQASM subset
+
+Source consists of semicolon-terminated statements using the global registers `q` and `c`. For example:
+
+```qasm
+h q[0];
+cx q[0], q[1];
+rz(pi/4) q[1];
+barrier q;
+c[0] = measure q[0];
+c[1] = measure q[1];
+```
+
+- Supported gate names: `h`, `x`, `y`, `z`, `s`, `sdg`, `t`, `tdg`, `rx`, `ry`, `rz`, `cx`, `cy`, `cz`, `swap`, `ccx`, `barrier`.
+- Angles accept finite decimal/scientific notation and signed pi fractions such as `-pi/2`; arbitrary expressions/functions are not supported.
+- Measurement forms: `c[0] = measure q[0];`, `measure q[0] -> c[0];`, `c = measure q;`, or `measure q -> c;`.
+- Optional OpenQASM `2.0`/`3.0` headers and `qelib1.inc`/`stdgates.inc` includes are recognized. Register declarations, if supplied, must match the global qubit count and use only `q`/`c`.
+- Whole-register barriers and indexed barrier operand lists are supported. The QASM 3 emitter represents CY as `ctrl @ y`, also recognized by the parser.
+- Line/block comments are accepted. Other includes, gate definitions, reset, conditions, loops, user variables, arbitrary Python, and unsupported statements are rejected.
+- Measurement is terminal: no subsequent unitary operation is allowed. A qubit/classical bit may be measured at most once.
+- Limits: 4,096 blocks/expanded operations and 100,000 source characters per custom-code/module block.
+
+QNN, QRAM, undefined custom gates, and metadata-only community artifacts are not silently assigned artificial gate behavior. Replace them with supported gates or explicit modules before compiling.
+
+### Execution semantics and limits
+
+[jsQuantumSimulator.ts](./src/services/compiler/jsQuantumSimulator.ts) starts in the all-zero state and applies complex gate matrices using little-endian qubit indexing. Displayed bitstrings run highest index to lowest: `q[0]`/`c[0]` is the rightmost bit. It returns exact basis probabilities, or classical probabilities aggregated according to terminal measurement mappings (unmeasured classical bits remain zero).
+
+This is an ideal simulation: no noise, shot sampling, hardware execution, reset, or conditional control. Qiskit Python is **not evaluated** in the browser, and emitted QASM is not re-parsed for execution; both outputs and simulation use the same validated instructions.
+
+Up to **16 qubits** are simulated in a background worker. Circuits with **17-33 qubits** still generate downloadable code but show an explicit simulation-limit message without allocating a state vector. Reusable palette templates are browser-session-only; their placed node instances are included in normal workspace save/load and JSON export.
 
 ## Repository structure
 
@@ -166,13 +227,23 @@ QMLOps-ui
 |   |   `-- workspace
 |   |       |-- CanvasViewport.tsx
 |   |       |-- ControlRibbon.tsx
+|   |       |-- CompileDialog.tsx     # Language choice, code, worker results
 |   |       |-- NodePortWire.tsx      # Exports NodePortWrite properties panel
 |   |       `-- WaveProfileMonitor.tsx
 |   |-- hooks
 |   |   |-- useQuantumLibrarySync.ts
 |   |   `-- useWorkspaceActions.ts
 |   |-- services
-|   |   `-- quantumLayerStub.ts      # QASM export boundary
+|   |   |-- compiler
+|   |   |   |-- circuit.ts           # Gate catalog, types, validation, parser
+|   |   |   |-- index.ts             # Graph ordering and compilation entry point
+|   |   |   |-- jsQuantumSimulator.ts
+|   |   |   |-- simulator.worker.ts  # Off-main-thread simulation
+|   |   |   `-- transpilers
+|   |   |       |-- qasmTranspiler.ts
+|   |   |       `-- qiskitTranspiler.ts
+|   |   |-- download.ts             # Shared browser download helper
+|   |   `-- quantumLayerStub.ts      # Legacy stub; no longer used by exports
 |   `-- store
 |       |-- useGlobalQubitStore.ts
 |       `-- useWorkspaceStore.ts
@@ -182,6 +253,8 @@ QMLOps-ui
 |-- postcss.config.js
 |-- tailwind.config.js
 |-- tsconfig.json
+|-- tests
+|   `-- compiler.test.cjs
 `-- README.md
 ```
 
@@ -213,22 +286,25 @@ Library click / property edit / global qubit input
                          +-----------+-----------+
                          |                       |
                          v                       v
-                 /api/studio fetch       Browser downloads
-                         |               JSON / QASM stub
+                 /api/studio fetch       Downloads / compiler
+                         |               JSON / QASM / Qiskit
                          v
                 Server-memory registry
 ```
 
-- [useWorkspaceStore](./src/store/useWorkspaceStore.ts) owns `workspaceName`, `nodes`, and `edges`, and exposes setters, append actions, and reset.
+- [useWorkspaceStore](./src/store/useWorkspaceStore.ts) owns `workspaceName`, `nodes`, `edges`, and session-only reusable module templates, and exposes setters, append actions, positioning, deletion, and reset.
 - [useGlobalQubitStore](./src/store/useGlobalQubitStore.ts) owns the shared qubit count separately from node parameters.
 - [useWorkspaceActions](./src/hooks/useWorkspaceActions.ts) implements reset, save/load requests, and browser downloads.
 - [useQuantumLibrarySync](./src/hooks/useQuantumLibrarySync.ts) owns the fetched community list and the publish interaction.
-- [CanvasViewport](./src/components/workspace/CanvasViewport.tsx) subscribes to both stores and renders cards in a flex layout.
+- [CanvasViewport](./src/components/workspace/CanvasViewport.tsx) subscribes to both stores and supports positioned cards, palette drops, movement, and dependency wiring.
 - [NodePortWire.tsx](./src/components/workspace/NodePortWire.tsx) exports `NodePortWrite`, which updates selected-node parameters while preserving edges.
-- [WaveProfileMonitor](./src/components/workspace/WaveProfileMonitor.tsx) derives a decorative SVG path from node count/order. Its state count and error/coherence labels are not simulation measurements.
-- [quantumLayerStub](./src/services/quantumLayerStub.ts) accepts normalized node data and produces placeholder QASM text. It is the current boundary for future compiler integration.
+- [WaveProfileMonitor](./src/components/workspace/WaveProfileMonitor.tsx) derives a clearly labeled decorative SVG path from node count/order; it is not simulation output.
+- [CompileDialog](./src/components/workspace/CompileDialog.tsx) owns the chosen output language, generated-code snapshot, errors, worker lifecycle, and simulation results.
+- [compiler/index.ts](./src/services/compiler/index.ts) validates the graph and expands blocks into a shared circuit, then calls a language emitter.
+- [jsQuantumSimulator](./src/services/compiler/jsQuantumSimulator.ts) computes state-vector and terminal-measurement probabilities from that circuit.
+- [quantumLayerStub](./src/services/quantumLayerStub.ts) remains as an unused legacy stub; export/compile workflows no longer call it.
 
-[Button](./src/components/ui/button.tsx) is used by the ribbon. [Dialog](./src/components/ui/dialog.tsx) and [Slider](./src/components/ui/slider.tsx) are reusable components present in the repository but not wired into the current dashboard.
+[Button](./src/components/ui/button.tsx) is used by the ribbon and compilation card. [Dialog](./src/components/ui/dialog.tsx) provides the compilation modal, Escape handling, and focus containment/restoration. [Slider](./src/components/ui/slider.tsx) remains available but unused by the dashboard.
 
 ## Data models
 
@@ -249,7 +325,7 @@ interface EdgeData {
 }
 ```
 
-Node positions and edges are stored and exported, but the canvas does not currently use positions for layout or render edges.
+Node positions control canvas layout. Edges are rendered and become compiler ordering dependencies. A `Gate` node stores `gate`, `qubits`, optional `angle`, and measurement `bit` in `parameters`. Module/code nodes store OpenQASM `source` and an optional display `name`.
 
 ### JSON download / save payload
 
@@ -259,10 +335,10 @@ Node positions and edges are stored and exported, but the canvas does not curren
   "globalQubits": 8,
   "nodes": [
     {
-      "id": "qnn_example",
-      "type": "QNN",
+      "id": "h_example",
+      "type": "Gate",
       "position": { "x": 120, "y": 160 },
-      "parameters": { "layers": 4 }
+      "parameters": { "gate": "h", "qubits": [0] }
     }
   ],
   "edges": []
@@ -273,7 +349,7 @@ The API load response uses `global_qubit_count` instead of `globalQubits`; the a
 
 ### QASM export
 
-The exporter writes an `OPENQASM 3.0` header, a standard-gate include, legacy-style `qreg`/`creg` declarations, and per-node comments. QNN depth and QRAM mode appear as comments only. It does not emit executable gates, validate OpenQASM compatibility, or compile edges into operations.
+The exporter uses the validated compiler, emits `OPENQASM 3.0`, `stdgates.inc`, modern `qubit[n]`/`bit[n]` registers, executable gate operations, and explicit measurement mappings. The compilation card also offers Qiskit Python using `QuantumCircuit` and corresponding gate calls. Both operate on the same ordered circuit; see [Compilation and simulation](#compilation-and-simulation).
 
 ## API reference
 
@@ -336,18 +412,18 @@ Keep the Tailwind version, CSS directives, and PostCSS plugin configuration alig
 
 ## Current limitations
 
-- **No real quantum execution:** no simulator, quantum hardware SDK, model training, job queue, or numerical compiler is connected.
+- **No hardware/Python execution:** only the supported ideal JavaScript simulator runs locally; no hardware SDK, Python backend, model training, or job queue is connected.
 - **No durable persistence:** saved workspaces and published entries live only in server memory. Restarts, reloads of the server module, or separate server instances can lose or diverge data.
 - **No browser persistence or automatic loading:** Zustand state is not stored in local storage, scoped into per-user browser stores, or automatically rehydrated from the API.
 - **No authentication or authorization:** URL user IDs do not provide access control or isolation suitable for real users.
-- **Limited canvas editing:** there is no drag-and-drop positioning, edge creation/rendering, individual node deletion, undo/redo, or zoom/pan.
-- **Metadata-only publishing:** community entries are not reusable serialized subgraphs; non-QNN/QRAM cards currently use the generic custom-gate presentation.
-- **Export-only files:** there is no JSON file import or QASM parser. The workspace name has store support but no rename control.
-- **Illustrative telemetry:** curves, state-count labels, and coherence/error values do not reflect quantum computation.
+- **Limited canvas editing:** positioning, wiring, and deletion are supported; undo/redo, edge deletion controls, and zoom/pan are not implemented.
+- **Metadata-only community publishing:** server registry entries are not reusable serialized subgraphs. Local reusable modules use explicit supported OpenQASM and are separate from this registry.
+- **Restricted code input:** no JSON file import or arbitrary OpenQASM/Python execution. The workspace name has store support but no rename control.
+- **Illustrative topology preview:** the decorative curve is distinct from real compile-card simulation results.
 - **Prototype validation and feedback:** workflows use native browser alerts, prompts, and confirmations; network error handling and payload validation are limited.
 - **Desktop-oriented layout:** fixed-width sidebars are not a complete responsive/mobile design.
 
-Do not rely on UI messages mentioning cloud storage, secure saving, or connected runtimes as guarantees of those capabilities.
+Do not rely on legacy save/publish messages mentioning cloud storage or secure saving as guarantees of those capabilities.
 
 ## Validation and troubleshooting
 
@@ -356,12 +432,15 @@ Do not rely on UI messages mentioning cloud storage, secure saving, or connected
 1. Run `npm run build` to check compilation and TypeScript validity.
 2. Start `npm run dev` and open `/`.
 3. Confirm the redirect to `/studio/<userId>`, dark styling, and community items.
-4. Add native blocks, select them, and edit QNN/QRAM properties.
+4. Add supported gates/modules, select them, and edit their attributes in the left pane.
 5. Change global qubits and confirm cards update.
 6. Save, reset, then load using the same user URL.
-7. Download JSON/QASM and inspect their contents.
+7. Compile a two-qubit Bell pair in both languages: verify 50% `00` and 50% `11`, then inspect downloaded JSON/QASM/Python.
 8. Publish a named artifact and confirm it appears in the current page's community list.
 9. Check browser console and server terminal output for errors.
+10. Verify invalid operands, cyclic wires, undefined blocks, and unsupported custom source show explicit errors; verify a 17-qubit circuit generates code but skips simulation.
+
+Run `npm test` for service regression tests covering all supported gate outputs, complex amplitudes, entanglement, measurement mapping, graph ordering/errors, module expansion, parser rejection, and the exact 16/17-qubit simulation boundary.
 
 ### Module import errors
 
@@ -387,8 +466,8 @@ Use the same `/studio/<userId>` URL and select **Load**. The root redirect gener
 ## Extending the prototype
 
 - Add new block definitions in the native/community libraries and their property controls in the properties panel.
-- Replace [quantumLayerStub.ts](./src/services/quantumLayerStub.ts) with validated compilation behind the existing service boundary.
+- Extend the gate catalog, both language emitters, parser, simulator, and tests together when adding operations.
 - Replace module-level API storage with a persistent backend, then add authentication, authorization, and request/response schemas.
-- Add a graph interaction layer to consume stored positions and edges.
-- Add unit tests for store actions and compilation, API tests for persistence contracts, and browser tests for workspace workflows.
+- Add undo/redo, edge management, and zoom/pan to the graph interaction layer.
+- Expand test coverage to store actions, API persistence contracts, and automated browser workflows.
 - Before production use, implement reliable error reporting, numeric constraints, durable artifact storage, and accessibility/responsive behavior.

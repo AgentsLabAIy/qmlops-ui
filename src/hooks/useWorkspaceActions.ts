@@ -1,6 +1,7 @@
 import { useWorkspaceStore } from '../store/useWorkspaceStore';
 import { useGlobalQubitStore } from '../store/useGlobalQubitStore';
-import { compileToQASM } from '../services/quantumLayerStub';
+import { compileWorkspace } from '../services/compiler';
+import { downloadText } from '../services/download';
 
 export const useWorkspaceActions = (userId: string) => {
   const { nodes, edges, workspaceName, clearWorkspace, setWorkspaceState, setWorkspaceName } = useWorkspaceStore();
@@ -38,21 +39,16 @@ export const useWorkspaceActions = (userId: string) => {
 
   const handleExportJSON = () => {
     const payload = { workspaceName, globalQubits, nodes, edges };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `${workspaceName}.json`;
-    link.click();
+    downloadText(JSON.stringify(payload, null, 2), `${workspaceName}.json`, 'application/json');
   };
 
   const handleExportQASM = () => {
-    const standardPayload = nodes.map(n => ({ id: n.id, type: n.type, globalQubitCount: globalQubits, parameters: n.parameters }));
-    const qasmText = compileToQASM(standardPayload, globalQubits);
-    const blob = new Blob([qasmText], { type: 'text/plain' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `${workspaceName}.qasm`;
-    link.click();
+    try {
+      const { code } = compileWorkspace(nodes, edges, globalQubits, 'qasm');
+      downloadText(code, `${workspaceName}.qasm`);
+    } catch (error) {
+      alert(`QASM export failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   };
 
   return { handleNew, handleSave, handleLoad, handleExportJSON, handleExportQASM };
